@@ -18,7 +18,7 @@ SWIPE_MIN_SPEED = 400  # Kecepatan minimum kibasan (pixel per detik)
 # --- GESTUR: ANCANG-ANCANG (durasi dalam detik) ---
 INTENT_FIST_SEC = 0.8     # Kepalan untuk Start Presentation
 INTENT_CROSS_SEC = 1.0    # Kedua tangan di dada untuk Close
-INTENT_GUN_SEC = 0.8      # Pose pistol untuk Laser Pointer
+INTENT_SHAKA_SEC = 0.8    # Pose Shaka (🤙) untuk toggle Laser Pointer
 
 # --- GESTUR: FINGER SNAP (Blackout/Whiteout) ---
 SNAP_DISTANCE_CLOSED = 20  # Jarak jempol-jari tengah saat menempel (px)
@@ -30,7 +30,17 @@ COOLDOWN_SWIPE_MS = 1000
 COOLDOWN_START_MS = 2000
 COOLDOWN_CLOSE_MS = 2000
 COOLDOWN_SNAP_MS = 1
-COOLDOWN_LASER_MS = 0      # Laser tidak butuh cooldown (mode kontinu)
+COOLDOWN_LASER_TOGGLE_MS = 1500  # Cooldown antar toggle laser
+
+# --- LASER POINTER & CURSOR TRACKING ---
+LASER_MIN_CUTOFF = 0.4       # One Euro Filter: makin kecil = makin tenang saat diam
+LASER_BETA = 0.007           # One Euro Filter: makin besar = makin responsif saat gerak
+LASER_D_CUTOFF = 1.0         # One Euro Filter: derivative cutoff
+LASER_BOX_X_MIN = 0.20       # Batas kiri zona interaksi (% dari frame)
+LASER_BOX_X_MAX = 0.80       # Batas kanan zona interaksi
+LASER_BOX_Y_MIN = 0.15       # Batas atas zona interaksi
+LASER_BOX_Y_MAX = 0.85       # Batas bawah zona interaksi
+LASER_DEADZONE_PX = 2        # Deadzone kursor (pixel layar)
 
 # --- OBJECT LOCKING ---
 YOLO_CONFIDENCE = 0.5

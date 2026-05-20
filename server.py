@@ -28,10 +28,20 @@ def handle_gesture(action):
     elif action == "prev":
         print("💻 PyAutoGUI: Menekan tombol KIRI (<-)")
         pyautogui.press('left')
+    elif action == "laser_on":
+        print("💻 PyAutoGUI: Aktifkan Laser Pointer (Ctrl+L)")
+        pyautogui.hotkey('ctrl', 'l')
+    elif action == "laser_off":
+        print("💻 PyAutoGUI: Kembalikan Kursor Arrow (Ctrl+A)")
+        pyautogui.hotkey('ctrl', 'a')
+
+def handle_cursor_move(x, y):
+    """Pindahkan kursor OS ke koordinat layar (x, y) tanpa delay"""
+    pyautogui.moveTo(x, y, _pause=False)
 
 # Inisialisasi Sistem Inti
 locker = ObjectLocker()
-engine = GestureEngine(callback=handle_gesture)
+engine = GestureEngine(callback=handle_gesture, cursor_callback=handle_cursor_move)
 
 # Matikan failsafe agar mouse tidak error kalau menyentuh sudut layar
 pyautogui.FAILSAFE = False
