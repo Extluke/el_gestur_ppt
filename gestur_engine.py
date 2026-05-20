@@ -1,11 +1,12 @@
 # ============================================================
-# MANDOR AI v2.0 — GESTURE ENGINE (v1.1 - Anti False Positive)
+# MANDOR AI v2.0 — GESTURE ENGINE (GOD MODE V2.1)
+# Pendekatan: Velocity Spike + Dynamic ROI Scaling + Euclidean
 # ============================================================
 
 import cv2
 import mediapipe as mp
 import time
-import numpy as np
+import math
 from collections import deque
 from config import *
 
@@ -22,14 +23,15 @@ class GestureEngine:
             min_detection_confidence=MP_DETECTION_CONFIDENCE,
             min_tracking_confidence=MP_TRACKING_CONFIDENCE
         )
+        # Buffer menyimpan (x, y, timestamp)
         self.position_buffer = {
-            "Left": deque(maxlen=7),
-            "Right": deque(maxlen=7)
+            "Left":  deque(maxlen=20),
+            "Right": deque(maxlen=20)
         }
         self.last_action_time = 0
         self.current_cooldown = 0
         self.last_action_name = ""
-        print("✅ GestureEngine siap!")
+        print("✅ GestureEngine v2.1 (God Mode) siap!")
 
     def _in_cooldown(self):
         now = time.time() * 1000
@@ -39,106 +41,115 @@ class GestureEngine:
         self.last_action_time = time.time() * 1000
         self.current_cooldown = cooldown_ms
         self.last_action_name = action
-        print(f"🎯 AKSI: {action}")
+        print(f"🎯 AKSI DIEKSEKUSI: {action.upper()}")
         self.callback(action)
 
-    def _is_hand_open(self, landmarks):
+    def _is_hand_open(self, landmarks, frame_w, frame_h):
         """
-        Filter C: Cek apakah tangan terbuka (bukan mengepal).
-        Caranya: ujung jari harus lebih jauh dari pangkal jari
-        dibanding sendi tengah jari.
-        Return True jika minimal 3 dari 4 jari terbuka.
+        GERBANG 1: Menggunakan Euclidean Distance.
+        Kebal terhadap rotasi! Jari lurus jika jarak ujung jari 
+        ke pergelangan > jarak sendi tengah ke pergelangan.
         """
-        # Pasangan: (ujung jari, sendi tengah, pangkal)
-        finger_tips =  [8, 12, 16, 20]   # telunjuk, tengah, manis, kelingking
-        finger_pips =  [6, 10, 14, 18]   # sendi tengah
-        finger_mcps =  [5,  9, 13, 17]   # pangkal
+        def calc_dist(p1, p2):
+            return math.hypot((p1.x - p2.x) * frame_w, (p1.y - p2.y) * frame_h)
 
+        wrist = landmarks[0]
+        finger_tips = [8, 12, 16, 20]
+        finger_pips = [6, 10, 14, 18]
         open_count = 0
-        for tip, pip, mcp in zip(finger_tips, finger_pips, finger_mcps):
-            # Jari dianggap terbuka jika ujungnya lebih tinggi dari sendi tengah
-            # (nilai Y lebih kecil = lebih atas di koordinat gambar)
-            if landmarks[tip].y < landmarks[pip].y:
+
+        for tip, pip in zip(finger_tips, finger_pips):
+            dist_tip = calc_dist(wrist, landmarks[tip])
+            dist_pip = calc_dist(wrist, landmarks[pip])
+            if dist_tip > dist_pip:
                 open_count += 1
+                
+        return open_count >= 3
 
-        return open_count >= 3  # minimal 3 jari terbuka
-
-    def _is_hand_in_chest_zone(self, landmarks, frame_height):
-        """
-        Filter B: Cek apakah tangan berada di zona dada
-        (antara 25% - 80% tinggi frame).
-        Mencegah deteksi saat tangan di atas kepala atau di bawah pinggang.
-        """
-        # Gunakan landmark 9 (pangkal jari tengah) sebagai posisi tangan
-        hand_y = landmarks[9].y  # nilai 0.0 (atas) sampai 1.0 (bawah)
-        return 0.25 <= hand_y <= 0.80
-
-    def _detect_swipe(self, hand_label, landmarks, frame_width, frame_height):
-        # 1. Kita matikan sementara zona dada untuk testing, 
-        # dan HAPUS buffer.clear() agar ingatan tidak gampang amnesia!
-        # if not self._is_hand_in_chest_zone(landmarks, frame_height):
-        #     return 
-
-        lm9 = landmarks[9]
-        x_now = lm9.x * frame_width
-        y_now = lm9.y * frame_height
-        now = time.time() * 1000
-
-        buffer = self.position_buffer[hand_label]
-        
-        # Bersihkan jika format lama masih nyangkut
-        if len(buffer) > 0 and len(buffer[0]) == 2:
-            buffer.clear()
-
-        # Masukkan posisi sekarang ke memori
-        buffer.append((x_now, y_now, now))
-
-        # Tunggu sampai ingatan penuh 7 frame (sekitar 0.2 detik pergerakan)
-        if len(buffer) < 7:
+    def _detect_swipe(self, hand_label, landmarks, frame_w, frame_h):
+        # === GERBANG 1: Tangan harus terbuka (Anti-Rotasi) ===
+        if not self._is_hand_open(landmarks, frame_w, frame_h):
+            self.position_buffer[hand_label].clear()
             return
 
-        # Ambil memori paling ujung (7 frame yang lalu)
-        oldest_x, oldest_y, oldest_time = buffer[0]
+        # === GERBANG 2: Zona dada proporsional ===
+        hand_y = landmarks[9].y
+        if not (0.15 <= hand_y <= 0.90):
+            self.position_buffer[hand_label].clear()
+            return
 
-        delta_x = x_now - oldest_x
-        delta_y = y_now - oldest_y
+        x_now = landmarks[9].x * frame_w
+        y_now = landmarks[9].y * frame_h
+        now_ms = time.time() * 1000
 
-        # === LAPIS 1: Syarat Jarak Tempuh ===
-        if abs(delta_x) < SWIPE_THRESHOLD_PX:
+        buf = self.position_buffer[hand_label]
+        buf.append((x_now, y_now, now_ms))
+
+        if len(buf) < 4:
+            return
+
+        # === GERBANG 3: Hitung Kecepatan (Velocity) ===
+        recent = list(buf)[-4:]
+        velocities_x = []
+        
+        for i in range(1, len(recent)):
+            dx = recent[i][0] - recent[i-1][0]
+            dt = (recent[i][2] - recent[i-1][2]) / 1000.0  # detik
+            if dt > 0:
+                velocities_x.append(dx / dt)
+
+        if not velocities_x:
+            return
+
+        avg_velocity = sum(velocities_x) / len(velocities_x)
+        peak_velocity = max(velocities_x, key=abs)
+        delta_total = buf[-1][0] - buf[-4][0]
+
+        # === DYNAMIC ROI SCALING (Rahasia Kebal Jarak) ===
+        # Mengubah ukuran pixel ke persentase berdasarkan lebar kotak badan lu
+        min_dist_px = frame_w * 0.15   # Minimal geser sejauh 15% dari lebar badan
+        min_speed_px = frame_w * 0.4   # Minimal kecepatan menempuh 100% lebar badan per detik
+
+        # Cetak Telemetri hanya kalau ada pergerakan signifikan (buat kalibrasi lu)
+        if abs(delta_total) > (frame_w * 0.05):
+            print(f"[{hand_label}] Geser: {abs(delta_total):.0f}px (Min: {min_dist_px:.0f}) | Speed: {abs(peak_velocity):.0f}px/s (Min: {min_speed_px:.0f})")
+
+        # === GERBANG 4: Kecepatan puncak harus lolos ===
+        if abs(peak_velocity) < min_speed_px:
+            return
+
+        # === GERBANG 5: Konsistensi Arah (Semua frame harus searah) ===
+        arah_total = "kanan" if delta_total > 0 else "kiri"
+        arah_puncak = "kanan" if peak_velocity > 0 else "kiri"
+        
+        if arah_total != arah_puncak:
             return
             
-        # === LAPIS 2: Syarat Ayunan (Lebih Toleran) ===
-        # Gerakan X (Kanan-Kiri) HARUS lebih besar dari gerakan Y (Atas-Bawah).
-        # Tapi ayunan melengkung dari bahu tetep bakal lolos di sini!
-        if abs(delta_y) > abs(delta_x): 
+        arah = arah_total
+
+        # === GERBANG 6: Jarak total harus cukup ===
+        if abs(delta_total) < min_dist_px:
             return
 
-        # === EKSEKUSI ===
-        if delta_x > 0 and hand_label == "Right":
+        # === SEMUA GERBANG LOLOS → EKSEKUSI ===
+        if arah == "kanan" and hand_label == "Right":
             self._trigger_action("next", COOLDOWN_SWIPE_MS)
-            buffer.clear()
-        elif delta_x < 0 and hand_label == "Left":
+            buf.clear()
+        elif arah == "kiri" and hand_label == "Left":
             self._trigger_action("prev", COOLDOWN_SWIPE_MS)
-            buffer.clear()
+            buf.clear()
 
     def process_frame(self, frame, roi=None):
-        # if self._in_cooldown():
-        #     return frame
-
         h, w = frame.shape[:2]
 
         if roi:
             x1, y1, x2, y2 = roi
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
-
-            # --- eror handling kalau eror/kosong ---
             if x1 >= x2 or y1 >= y2:
-                return frame  # Kalau kotaknya error/kosong, skip proses frame ini
-                
+                return frame
             process_area = frame[y1:y2, x1:x2]
-            area_w = x2 - x1
-            area_h = y2 - y1
+            area_w, area_h = x2 - x1, y2 - y1
         else:
             process_area = frame
             area_w, area_h = w, h
@@ -154,7 +165,6 @@ class GestureEngine:
                 raw_label = hand_info.classification[0].label
                 hand_label = "Left" if raw_label == "Right" else "Right"
 
-                # Gambar landmark
                 if roi:
                     for lm in hand_landmarks.landmark:
                         cx = int(lm.x * area_w) + x1
@@ -167,13 +177,9 @@ class GestureEngine:
                         mp_styles.get_default_hand_connections_style()
                     )
 
-                # --- UBAH BAGIAN INI ---
-                # Cek cooldown di sini! Jadi tangan tetep kelacak dan digambar, 
-                # tapi deteksi kibasannya aja yang di-pause sebentar.
                 if not self._in_cooldown():
                     self._detect_swipe(hand_label, hand_landmarks.landmark, area_w, area_h)
                 else:
-                    # Bersihkan ingatan memori biar gak numpuk pas cooldown kelar
                     self.position_buffer[hand_label].clear()
 
         return frame
@@ -184,66 +190,56 @@ class GestureEngine:
             return f"Cooldown... ({sisa}ms)"
         return "Siap"
 
-
 # ============================================================
-# TEST MANDIRI
+# TEST MANDIRI — py gestur_engine.py
 # ============================================================
 if __name__ == "__main__":
     def on_gesture(action):
-        if action == "next":
-            print("👉 NEXT SLIDE")
-        elif action == "prev":
-            print("👈 PREV SLIDE")
+        if action == "next":   print("👉 NEXT SLIDE")
+        elif action == "prev": print("👈 PREV SLIDE")
 
     engine = GestureEngine(callback=on_gesture)
     cap = cv2.VideoCapture(CAMERA_INDEX)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
 
-    print("=" * 45)
-    print("🤖 TEST GESTURE ENGINE v1.1")
+    print("=" * 50)
+    print("🤖 TEST GESTURE ENGINE v2.1 (GOD MODE)")
     print("Kibas tangan KANAN ke kanan = NEXT")
     print("Kibas tangan KIRI  ke kiri  = PREV")
     print("Tekan Q untuk keluar")
-    print("=" * 45)
-
-    # Variabel untuk flash notifikasi di layar
-    notif_text = ""
-    notif_time = 0
+    print("=" * 50)
 
     while True:
         ret, frame = cap.read()
-        if not ret:
-            break
+        if not ret: break
 
         frame = cv2.flip(frame, 1)
         h, w = frame.shape[:2]
 
-        # Garis zona dada (visual helper untuk tuning)
-        zona_atas = int(h * 0.25)
-        zona_bawah = int(h * 0.80)
-        cv2.line(frame, (0, zona_atas), (w, zona_atas), (0, 255, 255), 1)
-        cv2.line(frame, (0, zona_bawah), (w, zona_bawah), (0, 255, 255), 1)
-        cv2.putText(frame, "ZONA AKTIF", (10, zona_atas - 5),
+        y_atas  = int(h * 0.15)
+        y_bawah = int(h * 0.90)
+        cv2.line(frame, (0, y_atas),  (w, y_atas),  (0, 255, 255), 1)
+        cv2.line(frame, (0, y_bawah), (w, y_bawah), (0, 255, 255), 1)
+        cv2.putText(frame, "ZONA AKTIF", (10, y_atas - 5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
 
         frame = engine.process_frame(frame)
 
-        # Notifikasi aksi
-        if engine.last_action_name and time.time() - engine.last_action_time/1000 < 1.0:
-            label = "👉 NEXT" if engine.last_action_name == "next" else "👈 PREV"
-            cv2.putText(frame, label, (w//2 - 60, h//2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+        if engine.last_action_name:
+            elapsed = time.time() - engine.last_action_time / 1000
+            if elapsed < 1.0:
+                label = "NEXT >>" if engine.last_action_name == "next" else "<< PREV"
+                cv2.putText(frame, label, (w//2 - 80, h//2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
 
-        # Status bar
         status = engine.get_status()
-        cv2.rectangle(frame, (0, h-40), (w, h), (0, 0, 0), -1)
-        cv2.putText(frame, f"Status: {status}", (10, h-15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+        cv2.rectangle(frame, (0, h-40), (w, h), (0,0,0), -1)
+        cv2.putText(frame, f"Status: {status} | Adaptif Skala ROI Aktif",
+                    (10, h-12), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1)
 
-        cv2.imshow("Mandor AI v2 - Test Gesture", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+        cv2.imshow("Mandor AI v2 - Gesture Engine v2.1", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'): break
 
     cap.release()
     cv2.destroyAllWindows()

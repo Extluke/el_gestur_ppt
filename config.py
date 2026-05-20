@@ -9,11 +9,11 @@ CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
 
-# --- GESTUR: KIBASAN (Next/Prev Slide) ---
-SWIPE_THRESHOLD_PX = 50      # Min delta X untuk dianggap kibasan
+# --- GESTUR: KIBASAN (Next /Prev Slide) ---
+SWIPE_THRESHOLD_PX = 80      # Min delta X untuk dianggap kibasan
 
 SWIPE_MAX_DURATION_MS = 1000  # Max durasi kibasan (ms), lebih lambat = bukan kibas
-SWIPE_MIN_SPEED = 150  # Kecepatan minimum kibasan (pixel per detik)
+SWIPE_MIN_SPEED = 400  # Kecepatan minimum kibasan (pixel per detik)
 
 # --- GESTUR: ANCANG-ANCANG (durasi dalam detik) ---
 INTENT_FIST_SEC = 0.8     # Kepalan untuk Start Presentation
@@ -26,10 +26,10 @@ SNAP_DISTANCE_OPEN = 80    # Jarak jempol-jari tengah setelah snap (px)
 SNAP_MAX_FRAMES = 3        # Max frame untuk transisi snap
 
 # --- COOLDOWN (dalam milidetik) ---
-COOLDOWN_SWIPE_MS = 500
+COOLDOWN_SWIPE_MS = 1000
 COOLDOWN_START_MS = 2000
 COOLDOWN_CLOSE_MS = 2000
-COOLDOWN_SNAP_MS = 1500
+COOLDOWN_SNAP_MS = 1
 COOLDOWN_LASER_MS = 0      # Laser tidak butuh cooldown (mode kontinu)
 
 # --- OBJECT LOCKING ---
