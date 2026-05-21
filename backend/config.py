@@ -20,6 +20,10 @@ INTENT_FIST_SEC = 0.8     # Kepalan untuk Start Presentation
 INTENT_CROSS_SEC = 1.0    # Kedua tangan di dada untuk Close
 INTENT_SHAKA_SEC = 0.8    # Pose Shaka (🤙) untuk toggle Laser Pointer
 
+# --- GESTUR: QUIT (T-Pose / Time Out) ---
+INTENT_QUIT_SEC = 1.0       # Harus ditahan 1 detik agar tidak tereksekusi tanpa sengaja
+COOLDOWN_QUIT_MS = 2000     # Cooldown super panjang (2 detik) karena ini aksi destruktif
+
 # --- GESTUR: FINGER SNAP (Blackout/Whiteout) ---
 SNAP_DISTANCE_CLOSED = 20  # Jarak jempol-jari tengah saat menempel (px)
 SNAP_DISTANCE_OPEN = 80    # Jarak jempol-jari tengah setelah snap (px)
