@@ -1,13 +1,14 @@
 # ============================================================
-# MANDOR AI v2.0 — GESTURE ENGINE (GOD MODE V2.4 - THE FOX)
-# Pendekatan: Velocity Spike + Dynamic ROI Scaling + Euclidean
-# Fitur: Swipe, Start, Laser, dan Quit (Kon / Fox Pose)
+# MANDOR AI v2.0 — GESTURE ENGINE (HYBRID VECTOR + OLD SWIPE)
+# Fitur: Swipe & Start (Klasik), Laser Tracking (Klasik)
+# Fitur Vector Math: Pose KON (Quit) & Pose Toggle Laser (Initial)
 # ============================================================
 
 import cv2
 import mediapipe as mp
 import time
 import math
+import numpy as np # 🚨 Wajib untuk Vector Math Pose Kon & Toggle Laser
 import pyautogui
 import sys
 from collections import deque
@@ -69,9 +70,7 @@ class GestureEngine:
             "Right": {"stage": 0, "fist_time": 0, "initial_y": 0, "raised": False}
         }
         
-        # Tracker terpisah untuk tiap tangan agar stabil
         self.quit_intent_start = {"Left": None, "Right": None}
-
         self.laser_active = False
         self.shaka_intent_start = None
         self.shaka_toggled = False       
@@ -79,7 +78,7 @@ class GestureEngine:
         self.last_cursor_x, self.last_cursor_y = None, None
         self.screen_w, self.screen_h = pyautogui.size()
 
-        print("✅ GestureEngine v2.4 (God Mode + Fox Summon) siap!")
+        print("✅ GestureEngine v2.4 (Hybrid: Stable Swipe + Vector Laser/Kon) siap!")
 
     def _in_cooldown(self):
         return (time.time() * 1000 - self.last_action_time) < self.current_cooldown
@@ -95,6 +94,13 @@ class GestureEngine:
     def _calc_dist(p1, p2, w, h):
         return math.hypot((p1.x - p2.x) * w, (p1.y - p2.y) * h)
 
+    # ALAT HITUNG VEKTOR (Khusus Pose KON dan TOGGLE LASER)
+    def _calculate_angle(self, a, b, c):
+        ba = np.array(a) - np.array(b)
+        bc = np.array(c) - np.array(b)
+        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+        return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
+
     # ========================================================
     # PENDETEKSI POSE TANGAN
     # ========================================================
@@ -106,14 +112,7 @@ class GestureEngine:
     def _is_fist(self, landmarks):
         return all(landmarks[tip].y > landmarks[mcp].y for tip, mcp in zip([8, 12, 16, 20], [5, 9, 13, 17]))
 
-    def _is_shaka_pose(self, landmarks, w, h):
-        d, wrist = self._calc_dist, landmarks[0]
-        return (d(wrist, landmarks[4], w, h) > d(wrist, landmarks[2], w, h) and
-                d(wrist, landmarks[20], w, h) > d(wrist, landmarks[18], w, h) and
-                d(wrist, landmarks[8], w, h) < d(wrist, landmarks[6], w, h) and
-                d(wrist, landmarks[12], w, h) < d(wrist, landmarks[10], w, h) and
-                d(wrist, landmarks[16], w, h) < d(wrist, landmarks[14], w, h))
-
+    # KODE LAMA: UNTUK MENGGERAKKAN KURSOR LASER (TELUNJUK KE ATAS)
     def _is_index_pointing(self, landmarks, w, h):
         d, wrist = self._calc_dist, landmarks[0]
         return (d(wrist, landmarks[8], w, h) > d(wrist, landmarks[6], w, h) and
@@ -122,20 +121,40 @@ class GestureEngine:
                 d(wrist, landmarks[20], w, h) < d(wrist, landmarks[18], w, h) and
                 d(wrist, landmarks[4], w, h) < d(wrist, landmarks[3], w, h) * 1.15)
 
-    # --- THE FOX POSE (KON) UNTUK QUIT ---
+    # 🔥 LOGIKA BARU BERDASARKAN CSV LU: INITIAL STATE TOGGLE LASER 
+    def _is_laser_toggle_pose(self, landmarks, w, h):
+        pts = [(l.x * w, l.y * h) for l in landmarks]
+        
+        # Hitung Sudut Telunjuk dan Kelingking
+        deg_index = self._calculate_angle(pts[0], pts[5], pts[8])
+        deg_pinky = self._calculate_angle(pts[0], pts[17], pts[20])
+        
+        # Hitung Rasio Jempol (Jarak jempol ke tengah telapak vs Lebar telapak)
+        palm_width = self._calc_dist(landmarks[5], landmarks[17], w, h) + 1e-6
+        dist_thumb = self._calc_dist(landmarks[4], landmarks[9], w, h) / palm_width
+
+        # Aturan Berdasarkan Data CSV:
+        # Kelingking Lurus (>140), Telunjuk Nekuk/Mengepal (<130), Jempol Terbuka (Rasio >1.0)
+        pinky_straight = deg_pinky > 140.0
+        index_curled = deg_index < 130.0
+        thumb_extended = dist_thumb > 1.0
+        
+        return pinky_straight and index_curled and thumb_extended
+
+    # 🔥 VECTOR MATH: THE FOX POSE (KON) UNTUK QUIT
     def _is_fox_pose(self, landmarks, w, h):
-        d, wrist = self._calc_dist, landmarks[0]
+        pts = [(l.x * w, l.y * h) for l in landmarks]
+        deg_index = self._calculate_angle(pts[0], pts[5], pts[8])
+        deg_middle = self._calculate_angle(pts[0], pts[9], pts[12])
+        deg_ring = self._calculate_angle(pts[0], pts[13], pts[16])
+        deg_pinky = self._calculate_angle(pts[0], pts[17], pts[20])
         
-        # Telinga Rubah: Telunjuk & Kelingking LURUS
-        index_open = d(wrist, landmarks[8], w, h) > d(wrist, landmarks[6], w, h)
-        pinky_open = d(wrist, landmarks[20], w, h) > d(wrist, landmarks[18], w, h)
+        index_straight = deg_index > 130.0   
+        pinky_straight = deg_pinky > 130.0   
+        middle_curled = deg_middle < 110.0   
+        ring_curled = deg_ring < 110.0       
         
-        # Moncong Rubah: Tengah, Manis, Jempol MENEKUK ke dalam
-        middle_curled = d(wrist, landmarks[12], w, h) < d(wrist, landmarks[10], w, h)
-        ring_curled = d(wrist, landmarks[16], w, h) < d(wrist, landmarks[14], w, h)
-        thumb_curled = d(wrist, landmarks[4], w, h) < d(wrist, landmarks[3], w, h) * 1.2
-        
-        return index_open and pinky_open and middle_curled and ring_curled and thumb_curled
+        return index_straight and pinky_straight and middle_curled and ring_curled
 
     # ========================================================
     # LOGIKA GESTUR AKSI
@@ -177,9 +196,9 @@ class GestureEngine:
                     self.start_state["Left"]["stage"] = self.start_state["Right"]["stage"] = 0
                 else: state["stage"] = 0
 
-    # --- LOGIKA LASER ---
+    # --- LOGIKA TOGGLE LASER ---
     def _detect_laser_toggle(self, landmarks, area_w, area_h):
-        if self._is_shaka_pose(landmarks, area_w, area_h):
+        if self._is_laser_toggle_pose(landmarks, area_w, area_h):
             if self.shaka_intent_start is None: self.shaka_intent_start = time.time()
             elif not self.shaka_toggled and (time.time() - self.shaka_intent_start >= getattr(sys.modules[__name__], 'INTENT_SHAKA_SEC', 0.8)):
                 self.laser_active, self.shaka_toggled = not self.laser_active, True  
@@ -254,15 +273,19 @@ class GestureEngine:
 
                 lm = hand_landmarks.landmark
                 
-                # 1. Cek Gestur Toggle dan Kon (Quit) secara independen
+                # 1. Cek Gestur Toggle dan Kon (Quit) secara independen kapan saja
                 self._detect_laser_toggle(lm, area_w, area_h)
                 self._detect_quit_presentation(hand_label, lm, area_w, area_h)
 
-                # 2. Routing Aksi Inti (Berdasarkan Status Laser)
+                # 2. 🚨 KUNCIAN MODE: Routing Aksi Inti Berdasarkan Status Laser
                 if self.laser_active:
-                    if self._is_index_pointing(lm, area_w, area_h): self._track_index_finger(lm, area_w, area_h)
-                    else: self.filter_x = self.filter_y = self.last_cursor_x = self.last_cursor_y = None
+                    # Selama mode Laser AKTIF, hanya kode _track_index_finger yang boleh jalan.
+                    if self._is_index_pointing(lm, area_w, area_h): 
+                        self._track_index_finger(lm, area_w, area_h)
+                    else: 
+                        self.filter_x = self.filter_y = self.last_cursor_x = self.last_cursor_y = None
                 else:
+                    # Selama mode Laser MATI, fitur Swipe & Start Presentation kembali diizinkan.
                     if not self._in_cooldown():
                         self._detect_swipe(hand_label, lm, area_w, area_h)
                         self._detect_start_presentation(hand_label, lm, area_w, area_h)
