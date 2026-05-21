@@ -9,4 +9,5 @@ backend/__pycache__/
 backend/venv/
 backend/env/
 backend/.venv/
+venv/
 *.pyc
